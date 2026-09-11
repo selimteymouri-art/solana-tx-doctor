@@ -1,0 +1,228 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jbmono);
+  --font-display: var(--font-display);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+}
+
+/* ---- entrance transitions ---- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.reveal {
+  opacity: 0;
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+/* ---- subtle blueprint grid backdrop ---- */
+.bg-grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+/* ---- cute 3D floaties ---- */
+.persp {
+  perspective: 700px;
+}
+.cube3d {
+  position: relative;
+  transform-style: preserve-3d;
+  animation: spin3d 9s linear infinite;
+}
+.cube3d > div {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  background: linear-gradient(135deg, rgb(139 92 246 / 0.55), rgb(52 211 153 / 0.45));
+  box-shadow: inset 0 0 18px rgb(255 255 255 / 0.15);
+  backdrop-filter: blur(2px);
+}
+@keyframes spin3d {
+  from {
+    transform: rotateX(-18deg) rotateY(0deg);
+  }
+  to {
+    transform: rotateX(-18deg) rotateY(360deg);
+  }
+}
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--tilt, 0deg));
+  }
+  50% {
+    transform: translateY(-14px) rotate(var(--tilt, 0deg));
+  }
+}
+.animate-floaty {
+  animation: floaty 5s ease-in-out infinite;
+}
+.animate-floaty-slow {
+  animation: floaty 8s ease-in-out infinite;
+}
+@keyframes orbit {
+  from {
+    transform: rotate(0deg) translateX(34px) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateX(34px) rotate(-360deg);
+  }
+}
+.animate-orbit {
+  animation: orbit 7s linear infinite;
+}
+@keyframes ecg {
+  to {
+    stroke-dashoffset: -320;
+  }
+}
+.ecg-path {
+  stroke-dasharray: 80 240;
+  animation: ecg 3.2s linear infinite;
+}
+@keyframes gemspin {
+  0%,
+  100% {
+    transform: rotate(45deg) scale(1);
+  }
+  50% {
+    transform: rotate(225deg) scale(1.12);
+  }
+}
+.animate-gem {
+  animation: gemspin 8s ease-in-out infinite;
+}
+@keyframes spin3dwobble {
+  0%,
+  100% {
+    transform: rotateX(-22deg) rotateY(0deg) rotateZ(0deg);
+  }
+  50% {
+    transform: rotateX(-8deg) rotateY(180deg) rotateZ(4deg);
+  }
+}
+.cube3d-sharp {
+  animation: spin3dwobble 7s ease-in-out infinite;
+}
+@keyframes matrixfall {
+  from {
+    transform: translateY(-50%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-matrix {
+  animation: matrixfall 14s linear infinite;
+}
+@keyframes bargrow {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.animate-bar {
+  transform-origin: bottom;
+  animation: bargrow 2.8s ease-in-out infinite;
+}
+@keyframes pingslow {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+.animate-ping-slow {
+  animation: pingslow 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes shadowpulse {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scaleX(0.72);
+    opacity: 0.18;
+  }
+}
+.animate-shadow {
+  animation: shadowpulse 5s ease-in-out infinite;
+}
+
+/* ---- rising energy field ---- */
+@keyframes riseup {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.animate-rise-slow {
+  animation: riseup 22s linear infinite;
+}
+@keyframes aurapulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    scale: 1 1;
+  }
+  50% {
+    opacity: 0.95;
+    scale: 1 1.05;
+  }
+}
+.animate-aura {
+  transform-origin: bottom;
+  animation: aurapulse 7s ease-in-out infinite;
+}
+.glow-num {
+  text-shadow:
+    0 0 10px rgb(255 150 60 / 0.9),
+    0 0 30px rgb(255 106 0 / 0.45);
+}
