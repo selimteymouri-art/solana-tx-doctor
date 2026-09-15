@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Orbitron, Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Orbitron({
+const display = Inter({
   variable: "--font-display",
   subsets: ["latin"],
   weight: ["600", "700", "800", "900"],
@@ -19,9 +19,9 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Xeza — Meme Coin X-Ray",
+  title: "XEZA · The $5 Test",
   description:
-    "Paste a Solana token address. See the creator, top holders, first-hour wallets, insider links, liquidity — and an honest 1–10 sanity score.",
+    "If your entire bankroll was $100, how rational would putting $5 here be? Paste a Solana token contract and run the $5 Test.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

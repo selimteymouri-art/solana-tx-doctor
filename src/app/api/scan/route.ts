@@ -21,22 +21,31 @@ function demoScan(mint: string): TokenScan {
       { signature: "demo-sig-2", time: new Date(Date.now() - 4 * 3600_000).toISOString(), side: "buy", solAmount: 1.2 },
     ],
     earlyBuyers: [
-      { address: "Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", time: new Date(Date.now() - 5.5 * 3600_000).toISOString(), linkedToCreator: true, linkReason: "Direct on-chain interaction with creator", solAmount: 3.1 },
-      { address: "Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp9Oo8Nn91x", time: new Date(Date.now() - 5.2 * 3600_000).toISOString(), linkedToCreator: false, linkReason: null, solAmount: 0.8 },
-      { address: "Qq1Ww2Ee3Rr4Tt5Yy6Uu7Ii8Oo9Pp0Aa1Ss2Dd91x", time: new Date(Date.now() - 4.9 * 3600_000).toISOString(), linkedToCreator: false, linkReason: null, solAmount: 5.0 },
+      { address: "Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", time: new Date(Date.now() - 5.5 * 3600_000).toISOString(), linkedToCreator: true, linkReason: "Direct on-chain interaction with creator", confidence: "strong", solAmount: 3.1 },
+      { address: "Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0Pp9Oo8Nn91x", time: new Date(Date.now() - 5.2 * 3600_000).toISOString(), linkedToCreator: false, linkReason: null, confidence: null, solAmount: 0.8 },
+      { address: "Qq1Ww2Ee3Rr4Tt5Yy6Uu7Ii8Oo9Pp0Aa1Ss2Dd91x", time: new Date(Date.now() - 4.9 * 3600_000).toISOString(), linkedToCreator: false, linkReason: null, confidence: null, solAmount: 5.0 },
     ],
     topHolders: [
-      { owner: "Pool9xQeWvG816bUx9EPjWMo8sVvGs9z8E8c9d91x", tokenAccount: "Pool9xQeWvG816bUx9EPjWMo8sVvGs9z8E8c9d91x", amount: 620_000_000, pct: 62.0 },
-      { owner: "7fK9pL2mQ4xR8tYvBnCjD3fGhJ6kL1nP5qR7sT9uV91x", tokenAccount: "Ab1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", amount: 45_000_000, pct: 4.5 },
-      { owner: "Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", tokenAccount: "Cd1Dd2Ee3Ff4Gg5Hh6Jj7Kk8Ll9Mm0Nn1Oo2Pp91x", amount: 31_000_000, pct: 3.1 },
+      { owner: "Pool9xQeWvG816bUx9EPjWMo8sVvGs9z8E8c9d91x", tokenAccount: "Pool9xQeWvG816bUx9EPjWMo8sVvGs9z8E8c9d91x", amount: 620_000_000, pct: 62.0, tag: "unknown" },
+      { owner: "7fK9pL2mQ4xR8tYvBnCjD3fGhJ6kL1nP5qR7sT9uV91x", tokenAccount: "Ab1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", amount: 45_000_000, pct: 4.5, tag: "creator" },
+      { owner: "Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh8Jj9Kk0Ll1Mm2Nn91x", tokenAccount: "Cd1Dd2Ee3Ff4Gg5Hh6Jj7Kk8Ll9Mm0Nn1Oo2Pp91x", amount: 31_000_000, pct: 3.1, tag: "linked" },
     ],
+    contract: { mintAuthority: null, freezeAuthority: null },
+    network: { creatorPct: 4.5, linkedCount: 1, linkedPct: 3.1, combinedPct: 7.6, confidence: "medium" },
     poolCreatedAt: new Date(Date.now() - 6 * 3600_000).toISOString(),
+    scannedAt: new Date().toISOString(),
     market: {
       priceUsd: 0.0004123,
       liquidityUsd: 84_500,
+      marketCap: 412_300,
+      fdv: 412_300,
       volumeH1: 12_300,
       volumeH24: 210_000,
+      txnsH1: { buys: 821, sells: 394 },
+      txnsH24: { buys: 5200, sells: 3100 },
+      priceChangeM5: 2.1,
       priceChangeH1: 34.5,
+      priceChangeH6: 88.0,
       priceChangeH24: 180.2,
       dex: "raydium",
       pairUrl: "https://dexscreener.com/solana/demo",
@@ -46,16 +55,18 @@ function demoScan(mint: string): TokenScan {
         { label: "twitter", url: "https://x.com/demo" },
         { label: "telegram", url: "https://t.me/demo" },
       ],
+      poolCount: 1,
+      priceWarning: null,
     },
     sanity: {
       score: 6,
       reasons: [
-        { label: "$5 is 5% of $100 — lotto-ticket sizing, survivable if it goes to zero", good: true },
-        { label: "Liquidity $84,500 — enough to exit $5", good: true },
-        { label: "Creator holds ~4.5% — low dump leverage", good: true },
+        { label: "$5 is 5% of $100. Lotto ticket sizing, survivable if it goes to zero", good: true },
+        { label: "Liquidity $84,500. Enough to exit a $5 position", good: true },
+        { label: "Creator holds ~4.5%. Low dump leverage", good: true },
         { label: "1/3 early buyers link to creator", good: false },
       ],
-      verdict: "Reasonable degen play — sized right, eyes open.",
+      verdict: "Reasonable degen play. Sized right, eyes open.",
     },
     warnings: [],
   };
@@ -66,7 +77,7 @@ export async function POST(req: NextRequest) {
     const { mint } = await req.json();
     if (typeof mint !== "string" || !MINT_RE.test(mint.trim())) {
       return NextResponse.json(
-        { error: "Invalid mint address (expected base58, 32–44 chars)." },
+        { error: "That does not look like a valid contract address." },
         { status: 400 }
       );
     }

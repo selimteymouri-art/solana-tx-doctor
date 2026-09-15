@@ -1,36 +1,56 @@
 "use client";
 import { useState } from "react";
 import Image from "next/image";
-import Floaties, { MatrixRain } from "@/components/XezaDecor";
 
 interface CreatorBuy { signature: string; time: string | null; side: string; solAmount: number | null }
-interface EarlyBuyer { address: string; time: string | null; linkedToCreator: boolean; linkReason: string | null; solAmount: number | null }
-interface TopHolder { owner: string; tokenAccount: string; amount: number | null; pct: number | null }
+interface EarlyBuyer { address: string; time: string | null; linkedToCreator: boolean; linkReason: string | null; confidence: string | null; solAmount: number | null }
+interface TopHolder { owner: string; tokenAccount: string; amount: number | null; pct: number | null; tag: string }
 interface TokenLink { label: string; url: string }
 interface Scan {
   mint: string; name: string | null; symbol: string | null; decimals: number | null; supply: number | null;
   creator: { address: string; source: string; solBalance: number | null; tokenBalance: number | null };
-  creatorBuys: CreatorBuy[]; earlyBuyers: EarlyBuyer[]; topHolders: TopHolder[]; poolCreatedAt: string | null;
-  market: { priceUsd: number | null; liquidityUsd: number | null; volumeH1: number | null; volumeH24: number | null; priceChangeH1: number | null; priceChangeH24: number | null; dex: string | null; pairUrl: string | null; imageUrl: string | null; websites: TokenLink[]; socials: TokenLink[] };
+  creatorBuys: CreatorBuy[]; earlyBuyers: EarlyBuyer[]; topHolders: TopHolder[];
+  contract: { mintAuthority: string | null; freezeAuthority: string | null };
+  network: { creatorPct: number | null; linkedCount: number; linkedPct: number | null; combinedPct: number | null; confidence: string };
+  poolCreatedAt: string | null; scannedAt: string;
+  market: { priceUsd: number | null; liquidityUsd: number | null; marketCap: number | null; volumeH1: number | null; volumeH24: number | null; txnsH1: { buys: number; sells: number } | null; txnsH24: { buys: number; sells: number } | null; priceChangeM5: number | null; priceChangeH1: number | null; priceChangeH6: number | null; priceChangeH24: number | null; dex: string | null; pairUrl: string | null; imageUrl: string | null; websites: TokenLink[]; socials: TokenLink[]; poolCount: number; priceWarning: string | null };
   sanity: { score: number; reasons: { label: string; good: boolean }[]; verdict: string };
   warnings: string[];
 }
 
-const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "unknown");
-const short = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
+const short = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}...${a.slice(-4)}` : a);
 
-/** Exact decimal price — never exponential notation, full precision from DexScreener. */
+/** Adaptive price formatting. Never exponential notation. Brief §55-56. */
 const fmtPrice = (n: number | null) => {
-  if (n === null || !Number.isFinite(n)) return "—";
+  if (n === null || !Number.isFinite(n)) return "N/A";
   if (n === 0) return "$0";
-  if (n >= 1000) return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (n >= 1) return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  // small prices: show up to 12 significant decimals, trim trailing zeros, no exponent
-  let s = n.toFixed(12);
-  s = s.replace(/0+$/, "").replace(/\.$/, "");
-  return "$" + s;
+  if (n >= 100) return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (n >= 1) return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  if (n >= 0.01) return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  if (n >= 0.0001) return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 8 });
+  // very small: at least 4 significant non-zero digits, trim the rest
+  const sig = n.toPrecision(4);
+  let plain = Number(sig).toFixed(20).replace(/0+$/, "").replace(/\.$/, "");
+  return "$" + plain;
 };
-const fmtBig = (n: number | null) => (n === null ? "—" : `$${Math.round(n).toLocaleString()}`);
+
+/** Compact money: $1,482 / $18.4K / $2.81M / $1.24B. Brief §58. */
+const fmtCompact = (n: number | null) => {
+  if (n === null || !Number.isFinite(n)) return "N/A";
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+  if (abs >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+  if (abs >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+  return "$" + Math.round(n).toLocaleString();
+};
+
+const fmtAge = (iso: string | null) => {
+  if (!iso) return "N/A";
+  const mins = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+};
 
 const SRC_LABEL: Record<string, string> = {
   mintAuthority: "Mint authority (on-chain)",
@@ -39,45 +59,68 @@ const SRC_LABEL: Record<string, string> = {
   unknown: "Unknown",
 };
 
+const TAG_STYLE: Record<string, string> = {
+  creator: "border-[#ff2ea6]/50 bg-[#ff2ea6]/10 text-[#ff8ac2]",
+  linked: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  early: "border-[#38e1ff]/40 bg-[#38e1ff]/10 text-[#38e1ff]",
+  burn: "border-white/15 bg-white/5 text-zinc-500",
+  unknown: "border-white/10 bg-white/5 text-zinc-500",
+};
+
 function socialIcon(label: string) {
   const l = label.toLowerCase();
-  if (l.includes("twitter") || l.includes("x.com")) return "𝕏";
-  if (l.includes("telegram")) return "✈";
-  if (l.includes("discord")) return "◈";
-  if (l.includes("youtube")) return "▶";
+  if (l.includes("twitter") || l.includes("x.com")) return "X";
+  if (l.includes("telegram")) return "TG";
+  if (l.includes("discord")) return "DC";
+  if (l.includes("youtube")) return "YT";
   if (l.includes("medium")) return "M";
-  if (l.includes("github")) return "⌨";
-  if (l.includes("instagram")) return "◉";
-  if (l.includes("tiktok")) return "♪";
-  return "↗";
+  if (l.includes("github")) return "GH";
+  return "WEB";
 }
 
-function Card({ index, title, children }: { index: string; title: string; children: React.ReactNode }) {
+function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section aria-label={title} className="hud-corner rounded-lg border border-[#00ff9d]/15 bg-[#0b0f14]/90 p-5">
-      <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-[#00ff9d]/70">
-        <span className="text-[#ff2ea6]">{index}</span> · {title}
-      </p>
-      <div className="mt-3">{children}</div>
+    <section aria-label={title} className="rounded-xl border border-white/[0.08] bg-[#0c1017] p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-display text-[13px] font-bold uppercase tracking-[0.16em] text-zinc-300">{title}</h2>
+        {right}
+      </div>
+      <div className="mt-4">{children}</div>
     </section>
   );
 }
 
+const SCAN_STEPS = [
+  "Tracing deployer",
+  "Following funding",
+  "Scanning launch transactions",
+  "Analyzing first-hour buyers",
+  "Finding wallet connections",
+  "Checking holder concentration",
+  "Checking liquidity",
+  "Checking insider activity",
+  "Building $5 Test",
+];
+
+const ERR_COPY: Record<string, string> = {
+  invalid: "That does not look like a valid contract address.",
+  notfound: "We could not find a token for this contract.",
+  noliquidity: "No active liquidity pool found.",
+};
+
 export default function Home() {
   const [mint, setMint] = useState("");
   const [loading, setLoading] = useState(false);
-  const [phase, setPhase] = useState("");
+  const [stepIdx, setStepIdx] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [scanErr, setScanErr] = useState(false);
   const [demo, setDemo] = useState(false);
   const [scan, setScan] = useState<Scan | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function analyze() {
-    setLoading(true); setErr(null); setScan(null); setScanErr(false);
-    const phases = ["resolving creator…", "reading creator buys…", "loading top holders…", "tracing first-hour wallets…", "checking market…"];
-    let pi = 0;
-    setPhase(phases[0]);
-    const timer = setInterval(() => { pi = Math.min(pi + 1, phases.length - 1); setPhase(phases[pi]); }, 6000);
+    setLoading(true); setErr(null); setScan(null); setScanErr(false); setStepIdx(0);
+    const timer = setInterval(() => setStepIdx((i) => Math.min(i + 1, SCAN_STEPS.length - 1)), 3500);
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
@@ -85,277 +128,333 @@ export default function Home() {
         body: JSON.stringify({ mint: mint.trim() }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Scan failed");
+      if (!res.ok) {
+        const msg = String(json.error ?? "");
+        if (res.status === 400) throw new Error(ERR_COPY.invalid);
+        if (/creator|history/i.test(msg)) throw new Error(ERR_COPY.notfound);
+        throw new Error("Some live data could not be loaded. Try refreshing.");
+      }
       setDemo(json.demoMode);
       setScan(json.scan);
+      if (json.scan?.warnings?.length) setErr(null);
     } catch (e: any) {
-      setErr(e.message);
+      setErr(e.message ?? "Some live data could not be loaded. Try refreshing.");
       setScanErr(true);
     } finally {
       clearInterval(timer);
       setLoading(false);
-      setPhase("");
     }
   }
 
   const linked = scan?.earlyBuyers.filter((b) => b.linkedToCreator) ?? [];
   const s = scan?.sanity.score ?? 0;
+  const riskLabel = s <= 3 ? "HIGH RISK" : s <= 5 ? "RISKY" : s <= 7 ? "MIXED" : "CLEANER";
+  const riskColor = s <= 3 ? "text-[#ff2ea6]" : s <= 5 ? "text-amber-300" : s <= 7 ? "text-[#38e1ff]" : "text-[#00ff9d]";
   const ticker = scan?.symbol ? `$${scan.symbol.replace(/^\$/, "")}` : null;
-  const xSearchUrl = ticker
-    ? `https://x.com/search?q=${encodeURIComponent(ticker)}&src=typed_query&f=live`
-    : scan ? `https://x.com/search?q=${encodeURIComponent(scan.mint)}&src=typed_query&f=live` : null;
+  // Smarter X query: ticker + contract together so generic tickers do not drown. Brief §64.
+  const xQuery = ticker && scan ? `"${ticker}" "${scan.mint}"` : scan ? `"${scan.mint}"` : "";
+  const xSearchUrl = scan ? `https://x.com/search?q=${encodeURIComponent(xQuery)}&f=live` : null;
+  const xTickerUrl = ticker ? `https://x.com/search?q=${encodeURIComponent(ticker)}&f=live` : null;
+  const top10Pct = scan ? scan.topHolders.slice(0, 10).reduce((a, h) => a + (h.pct ?? 0), 0) : 0;
+
+  function copyCA() {
+    if (!scan) return;
+    navigator.clipboard?.writeText(scan.mint).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }
 
   return (
-    <div className="min-h-screen bg-[#0d0d0d] font-sans text-zinc-100">
-      {/* backdrop: matrix rain + scanline wash */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <MatrixRain />
-        <div className="absolute -top-48 left-1/2 h-[28rem] w-[46rem] -translate-x-1/2 rounded-full bg-[#00ff9d]/[0.07] blur-[130px]" />
-        <div className="absolute bottom-0 right-0 h-72 w-96 rounded-full bg-[#ff2ea6]/[0.06] blur-[100px]" />
-      </div>
-
-      <a href="#scanner" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded focus:bg-[#00ff9d] focus:px-3 focus:py-2 focus:text-black">
+    <div className="min-h-screen bg-[#070b12] font-sans text-zinc-100">
+      <a href="#scanner" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-black">
         Skip to scanner
       </a>
 
-      <header className="sticky top-0 z-50 border-b border-[#00ff9d]/10 bg-[#0d0d0d]/85 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#070b12]/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-2 px-5">
-          <a href="#top" className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 rotate-45 items-center justify-center border border-[#00ff9d]/70 bg-[#00ff9d]/10">
-              <span className="-rotate-45 font-display text-sm font-black text-[#00ff9d]">X</span>
-            </span>
-            <span className="font-display text-sm font-bold tracking-[0.18em]">XEZA</span>
+          <a href="#top" className="flex items-center gap-2">
+            <span className="font-display text-sm font-black tracking-[0.14em]">XEZA</span>
           </a>
           <nav className="ml-6 hidden items-center gap-5 text-[13px] text-zinc-400 sm:flex">
-            <a href="#scanner" className="transition hover:text-[#00ff9d]">Scanner</a>
-            <a href="https://docs.helius.dev" target="_blank" rel="noreferrer" className="transition hover:text-[#00ff9d]">Helius Docs</a>
+            <a href="#scanner" className="transition hover:text-white">Scanner</a>
+            <a href="https://docs.helius.dev" target="_blank" rel="noreferrer" className="transition hover:text-white">Helius Docs</a>
           </nav>
-          <a href="#scanner" className="ml-auto cursor-pointer rounded-sm border border-[#00ff9d]/60 bg-[#00ff9d]/10 px-4 py-1.5 font-mono text-[13px] font-bold text-[#00ff9d] transition hover:bg-[#00ff9d]/20">
-            [ SCAN ]
+          <a href="#scanner" className="ml-auto cursor-pointer rounded-lg bg-white px-4 py-1.5 text-[13px] font-bold text-black transition hover:brightness-90">
+            Run the $5 Test
           </a>
         </div>
       </header>
 
       <main id="top" className="relative mx-auto max-w-3xl px-5 pb-16">
-        <Floaties />
         <div className="relative z-10">
-          <div className="pt-14 text-center">
-            <div className="reveal inline-flex items-center gap-2 rounded-sm border border-[#00ff9d]/30 bg-[#00ff9d]/[0.06] px-3.5 py-1.5 font-mono text-[11px] tracking-[0.2em] text-[#00ff9d]" style={{ ["--d" as string]: "0s" }}>
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00ff9d] opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00ff9d]" />
-              </span>
-              MEME_COIN_X-RAY // SOLANA
+          {!scan && !loading && (
+            <div className="pt-16 text-center sm:pt-24">
+              <p className="font-display text-xs font-bold tracking-[0.3em] text-zinc-500">XEZA</p>
+              <h1 className="font-display mx-auto mt-4 max-w-xl text-5xl font-black tracking-tight sm:text-6xl">
+                THE $5 TEST
+              </h1>
+              <p className="mx-auto mt-4 max-w-md text-[15px] leading-relaxed text-zinc-400">
+                If your entire bankroll was $100, how rational would putting $5 here be?
+              </p>
             </div>
-            <h1 className="reveal font-display mx-auto mt-5 max-w-xl text-4xl font-black leading-[1.08] tracking-tight sm:text-5xl" style={{ ["--d" as string]: "0.08s" }}>
-              Who made this token — and{" "}
-              <span className="glow-num text-[#00ff9d]">should you ape $5?</span>
-            </h1>
-            <p className="reveal mx-auto mt-4 max-w-lg text-[15px] leading-relaxed text-zinc-400" style={{ ["--d" as string]: "0.16s" }}>
-              Paste a token contract address. See the creator, top holders, first-hour wallets, insider links, liquidity — and an honest 1–10 sanity score.
-            </p>
-          </div>
+          )}
 
-          <div id="scanner" className="reveal hud-corner mt-8 scroll-mt-20 rounded-lg border border-[#00ff9d]/20 bg-[#0b0f14]/90 p-2 shadow-2xl shadow-black/60 backdrop-blur" style={{ ["--d" as string]: "0.24s" }}>
-            <form
-              className="flex flex-col gap-2 sm:flex-row"
-              onSubmit={(e) => { e.preventDefault(); if (mint.trim() && !loading) analyze(); }}
-            >
+          {scan && (
+            <div className="pt-8">
+              <p className="text-center font-display text-[11px] font-bold tracking-[0.3em] text-zinc-500">XEZA · THE $5 TEST</p>
+            </div>
+          )}
+
+          <div id="scanner" className="mt-8 scroll-mt-20 rounded-xl border border-white/10 bg-white/[0.03] p-2 shadow-2xl shadow-black/50">
+            <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); if (mint.trim() && !loading) analyze(); }}>
               <label htmlFor="mint-input" className="sr-only">Token contract address</label>
               <input
                 id="mint-input"
                 value={mint}
                 onChange={(e) => setMint(e.target.value)}
-                placeholder="paste_contract_address…"
+                placeholder="Paste token contract address"
                 spellCheck={false}
                 autoComplete="off"
                 aria-invalid={scanErr}
                 aria-describedby={scanErr ? "scan-error" : undefined}
-                className="h-12 flex-1 rounded-sm border border-transparent bg-black/60 px-4 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-[#00ff9d]/50 focus:ring-2 focus:ring-[#00ff9d]/40 aria-[invalid=true]:border-[#ff2ea6]/60"
+                className="h-12 flex-1 rounded-lg bg-black/50 px-4 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:ring-2 focus:ring-white/30 aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[#ff2ea6]/50"
               />
               <button
                 type="submit"
                 disabled={loading || !mint.trim()}
                 aria-busy={loading}
-                className="h-12 cursor-pointer rounded-sm bg-[#00ff9d] px-7 font-mono text-sm font-bold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                className="h-12 cursor-pointer rounded-lg bg-white px-7 text-sm font-bold text-black transition hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {loading ? "> scanning_" : "> SCAN"}
+                {loading ? "Testing" : "Run the $5 Test"}
               </button>
             </form>
             {loading && (
-              <div className="px-2 pb-1 pt-2" role="status" aria-live="polite">
-                <div className="h-1 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-[#00ff9d] to-[#38e1ff]" />
-                </div>
-                <p className="mt-1.5 font-mono text-[11px] text-[#00ff9d]/80">{phase || "scanning…"}</p>
-              </div>
+              <ol className="space-y-1.5 px-3 pb-2 pt-3" role="status" aria-live="polite">
+                {SCAN_STEPS.map((st, i) => (
+                  <li key={st} className={`font-mono text-xs ${i < stepIdx ? "text-zinc-600" : i === stepIdx ? "text-zinc-100" : "text-zinc-700"}`}>
+                    {i < stepIdx ? "✓" : i === stepIdx ? "›" : "·"} {st}{i === stepIdx ? "..." : ""}
+                  </li>
+                ))}
+              </ol>
             )}
           </div>
 
-          {err && <p id="scan-error" role="alert" className="mt-4 rounded-sm border border-[#ff2ea6]/40 bg-[#ff2ea6]/10 p-3 text-sm text-[#ff8ac2]">{err}</p>}
+          {!scan && !loading && (
+            <p className="mt-4 text-center font-mono text-xs text-zinc-600">Follow the money before you follow the hype.</p>
+          )}
+
+          {err && <p id="scan-error" role="alert" className="mt-4 rounded-xl border border-[#ff2ea6]/30 bg-[#ff2ea6]/10 p-3 text-sm text-[#ff8ac2]">{err}</p>}
           {demo && (
-            <p className="mt-4 rounded-sm border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-              Demo mode — add HELIUS_API_KEY in .env.local for live on-chain data.
+            <p className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              Demo mode. Add HELIUS_API_KEY in .env.local for live on-chain data.
             </p>
           )}
           {scan?.warnings.map((w, i) => (
-            <p key={i} className="mt-2 rounded-sm border border-white/10 bg-white/[0.03] p-3 font-mono text-xs text-zinc-400">{w}</p>
+            <p key={i} className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-zinc-400">Analysis completed with limited data. {w}</p>
           ))}
 
           {scan && (
-            <div className="reveal mt-6 space-y-4" style={{ ["--d" as string]: "0.05s" }}>
-              {/* header: token + price */}
-              <div className="scanlines hud-corner relative overflow-hidden rounded-lg border border-[#00ff9d]/20 bg-[#0b0f14]/90 p-5 text-center">
-                {scan.market.imageUrl && (
-                  <Image src={scan.market.imageUrl} alt={scan.symbol ?? "token"} width={56} height={56} className="mx-auto rounded-full ring-2 ring-[#00ff9d]/40" unoptimized />
+            <div className="mt-6 space-y-4">
+              {/* token overview + score */}
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+                <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    {scan.market.imageUrl && (
+                      <Image src={scan.market.imageUrl} alt={scan.symbol ?? "token"} width={44} height={44} className="rounded-full" unoptimized />
+                    )}
+                    <div>
+                      <p className="font-display text-xl font-bold">{scan.symbol ? `$${scan.symbol}` : "Unknown token"}{scan.name ? <span className="ml-2 font-sans text-sm font-normal text-zinc-400">{scan.name}</span> : null}</p>
+                      <button onClick={copyCA} title="Copy contract address" className="mt-0.5 cursor-pointer font-mono text-xs text-zinc-500 transition hover:text-white">
+                        {short(scan.mint)} {copied ? "· Copied" : "· Copy"}
+                      </button>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {xTickerUrl && <a href={xTickerUrl} target="_blank" rel="noreferrer" title="Search ticker on X" className="cursor-pointer rounded-md border border-white/10 px-2 py-1 font-mono text-[11px] text-zinc-300 transition hover:border-white/30 hover:text-white">X Search</a>}
+                        {xSearchUrl && <a href={xSearchUrl} target="_blank" rel="noreferrer" title="Search contract on X" className="cursor-pointer rounded-md border border-white/10 px-2 py-1 font-mono text-[11px] text-zinc-300 transition hover:border-white/30 hover:text-white">X Contract</a>}
+                        {scan.market.websites.map((w) => <a key={w.url} href={w.url} target="_blank" rel="noreferrer" title="Website" className="cursor-pointer rounded-md border border-white/10 px-2 py-1 font-mono text-[11px] text-zinc-300 transition hover:border-white/30 hover:text-white">Website</a>)}
+                        {scan.market.socials.slice(0, 2).map((w) => <a key={w.url} href={w.url} target="_blank" rel="noreferrer" title={w.label} className="cursor-pointer rounded-md border border-white/10 px-2 py-1 font-mono text-[11px] text-zinc-300 transition hover:border-white/30 hover:text-white">{socialIcon(w.label)}</a>)}
+                        {scan.market.pairUrl && <a href={scan.market.pairUrl} target="_blank" rel="noreferrer" title="Open DEX" className="cursor-pointer rounded-md border border-white/10 px-2 py-1 font-mono text-[11px] text-zinc-300 transition hover:border-white/30 hover:text-white">DEX</a>}
+                      </div>
+                      {scan.market.websites.length === 0 && scan.market.socials.length === 0 && (
+                        <p className="mt-2 font-mono text-[11px] text-zinc-600">No verified project socials found.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-center sm:text-right">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">THE $5 TEST</p>
+                    <p className={`font-display text-5xl font-black tabular-nums ${riskColor}`}>{s}<span className="text-lg text-zinc-500">/10</span></p>
+                    <p className={`font-mono text-xs font-bold tracking-widest ${riskColor}`}>{riskLabel}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-center text-sm text-zinc-400 sm:text-left">If your total bankroll was $100, putting $5 here would currently score {s}/10.</p>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
+                  {[
+                    ["Price", fmtPrice(scan.market.priceUsd)],
+                    ["Market Cap", fmtCompact(scan.market.marketCap)],
+                    ["Liquidity", fmtCompact(scan.market.liquidityUsd)],
+                    ["Vol 24h", fmtCompact(scan.market.volumeH24)],
+                    ["Holders", scan.topHolders.length ? `Top ${scan.topHolders.length}` : "N/A"],
+                    ["Age", fmtAge(scan.poolCreatedAt)],
+                  ].map(([l, v]) => (
+                    <div key={l} className="rounded-lg bg-black/30 px-2 py-2.5">
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">{l}</p>
+                      <p className="mt-0.5 truncate text-sm font-bold tabular-nums" title={String(v)}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+                {scan.market.priceWarning && (
+                  <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-center font-mono text-[11px] text-amber-200">{scan.market.priceWarning}</p>
                 )}
-                <p className="font-display mt-2 text-xl font-bold">
-                  {scan.symbol ? `$${scan.symbol}` : "Unknown token"}{" "}
-                  {scan.name && <span className="font-sans text-sm font-normal text-zinc-400">{scan.name}</span>}
+                <p className="mt-2 text-center font-mono text-[10px] text-zinc-600">
+                  Source: {scan.market.dex ?? "unknown"} primary pool · {scan.market.poolCount} pool{scan.market.poolCount === 1 ? "" : "s"} · Scanned {new Date(scan.scannedAt).toLocaleTimeString()}
                 </p>
-                <p className="mt-1 break-all font-mono text-xs text-zinc-500">{scan.mint}</p>
-                <p className="glow-num font-display mt-3 break-all text-3xl font-black text-[#00ff9d]">{fmtPrice(scan.market.priceUsd)}</p>
-                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">live price · usd</p>
-                <div className="mt-4 grid grid-cols-3 gap-2">
-                  <div className="rounded-sm bg-black/40 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Liquidity</p><p className="font-display mt-1 font-bold">{fmtBig(scan.market.liquidityUsd)}</p></div>
-                  <div className="rounded-sm bg-black/40 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Vol 1h</p><p className="font-display mt-1 font-bold">{fmtBig(scan.market.volumeH1)}</p></div>
-                  <div className="rounded-sm bg-black/40 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Vol 24h</p><p className="font-display mt-1 font-bold">{fmtBig(scan.market.volumeH24)}</p></div>
-                </div>
-                {scan.market.priceChangeH1 !== null && (
-                  <p className={`mt-2 font-mono text-xs ${scan.market.priceChangeH1 >= 0 ? "text-[#00ff9d]" : "text-[#ff2ea6]"}`}>
-                    {scan.market.priceChangeH1 >= 0 ? "+" : ""}{scan.market.priceChangeH1.toFixed(1)}% (1h)
-                    {scan.market.priceChangeH24 !== null && <> · {scan.market.priceChangeH24 >= 0 ? "+" : ""}{scan.market.priceChangeH24.toFixed(1)}% (24h)</>}
-                  </p>
-                )}
-                {/* socials + x search */}
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  {scan.market.websites.map((w) => (
-                    <a key={w.url} href={w.url} target="_blank" rel="noreferrer" className="cursor-pointer rounded-sm border border-white/15 px-3 py-1.5 font-mono text-xs text-zinc-300 transition hover:border-[#00ff9d]/50 hover:text-[#00ff9d]">
-                      ⌂ Website
-                    </a>
-                  ))}
-                  {scan.market.socials.map((w) => (
-                    <a key={w.url} href={w.url} target="_blank" rel="noreferrer" className="cursor-pointer rounded-sm border border-white/15 px-3 py-1.5 font-mono text-xs text-zinc-300 transition hover:border-[#00ff9d]/50 hover:text-[#00ff9d]">
-                      {socialIcon(w.label)} {w.label}
-                    </a>
-                  ))}
-                  {xSearchUrl && (
-                    <a href={xSearchUrl} target="_blank" rel="noreferrer" className="cursor-pointer rounded-sm border border-[#38e1ff]/50 bg-[#38e1ff]/10 px-3 py-1.5 font-mono text-xs font-bold text-[#38e1ff] transition hover:bg-[#38e1ff]/20">
-                      𝕏 Search {ticker ?? "token"} posts
-                    </a>
-                  )}
-                </div>
               </div>
 
-              {/* 1 creator */}
-              {scan.creator.address ? (
-              <Card index="01" title="Creator wallet">
-                <p className="font-mono text-sm break-all text-[#00ff9d]">{scan.creator.address}</p>
-                <p className="mt-1 font-mono text-xs text-zinc-500">found_via: {SRC_LABEL[scan.creator.source] ?? scan.creator.source}</p>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-sm bg-black/40 p-3">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">SOL balance</p>
-                    <p className="mt-1 tabular-nums text-zinc-100">{scan.creator.solBalance !== null ? `${scan.creator.solBalance.toFixed(3)} SOL` : "—"}</p>
-                  </div>
-                  <div className="rounded-sm bg-black/40 p-3">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Holds of this token</p>
-                    <p className="mt-1 tabular-nums text-zinc-100">{scan.creator.tokenBalance !== null ? scan.creator.tokenBalance.toLocaleString() : "—"}</p>
-                  </div>
-                </div>
-              </Card>
-              ) : (
-              <Card index="01" title="Creator wallet">
-                <p className="font-mono text-sm text-zinc-400">unknown — mint authority revoked, history too deep to trace.</p>
-              </Card>
-              )}
+              {/* why this score */}
+              <Section title="Why this score">
+                <ul className="space-y-1.5 text-sm">
+                  {scan.sanity.reasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-zinc-300">
+                      <span className={r.good ? "text-emerald-400" : "text-amber-400"}>{r.good ? "✓" : "·"}</span>
+                      <span>{r.label}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 rounded-lg bg-black/30 p-3 text-sm text-zinc-200">{scan.sanity.verdict}</p>
+              </Section>
 
-              {/* 2 creator buys */}
-              <Card index="02" title={`Creator's own buys (${scan.creatorBuys.filter((b) => b.side === "buy").length})`}>
-                {scan.creatorBuys.length === 0 ? (
-                  <p className="text-sm text-zinc-400">No buys of their own token found in recent history.</p>
+              {/* creator */}
+              <Section title="Creator wallet" right={<span className="font-mono text-[11px] text-zinc-500">{scan.creator.address ? (SRC_LABEL[scan.creator.source] ?? "") : ""}</span>}>
+                {!scan.creator.address ? (
+                  <p className="text-sm text-zinc-400">No meaningful creator linked wallet cluster detected. Mint authority revoked, history too deep to trace.</p>
                 ) : (
-                  <ul className="space-y-2 text-sm">
-                    {scan.creatorBuys.slice(0, 8).map((b) => (
-                      <li key={b.signature} className="flex items-center justify-between gap-3 rounded-sm bg-black/40 px-3 py-2">
-                        <span className="font-mono text-xs text-zinc-400">{short(b.signature)} · {fmtDate(b.time)}</span>
-                        <span className={`rounded-sm px-2 py-0.5 font-mono text-[11px] ${b.side === "buy" ? "bg-[#00ff9d]/15 text-[#00ff9d]" : "bg-white/10 text-zinc-400"}`}>
-                          {b.side === "buy" ? `BUY${b.solAmount ? ` ${b.solAmount.toFixed(2)} SOL` : ""}` : "OTHER"}
+                  <>
+                    <p className="break-all font-mono text-sm text-zinc-100">{scan.creator.address}</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                      <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">SOL balance</p><p className="mt-1 tabular-nums">{scan.creator.solBalance !== null ? `${scan.creator.solBalance.toFixed(3)}` : "N/A"}</p></div>
+                      <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Token share</p><p className="mt-1 tabular-nums">{scan.network.creatorPct !== null ? `${scan.network.creatorPct.toFixed(1)}%` : "N/A"}</p></div>
+                      <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Own buys</p><p className="mt-1 tabular-nums">{scan.creatorBuys.filter((b) => b.side === "buy").length}</p></div>
+                      <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Mint / Freeze</p><p className="mt-1 font-mono text-xs">{scan.contract.mintAuthority ? "ACTIVE" : "revoked"} / {scan.contract.freezeAuthority ? "ACTIVE" : "revoked"}</p></div>
+                    </div>
+                  </>
+                )}
+              </Section>
+
+              {/* creator network */}
+              <Section title="Creator network" right={<span className="font-mono text-[11px] text-zinc-500">confidence: {scan.network.confidence}</span>}>
+                {scan.network.linkedCount === 0 ? (
+                  <p className="text-sm text-zinc-400">No meaningful creator linked wallet cluster detected.</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-zinc-200">{scan.network.linkedCount} wallet{scan.network.linkedCount === 1 ? "" : "s"} appear connected to the creator.</p>
+                    <ul className="mt-3 space-y-2">
+                      {linked.slice(0, 8).map((b) => (
+                        <li key={b.address} className="rounded-lg bg-black/30 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs">{short(b.address)}</span>
+                            <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">{b.confidence ?? "possible"}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-zinc-400">{b.linkReason}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
+                      <div className="rounded-lg bg-black/30 p-2.5"><p className="font-mono text-[10px] text-zinc-500">Creator</p><p className="font-bold tabular-nums">{scan.network.creatorPct !== null ? `${scan.network.creatorPct.toFixed(1)}%` : "N/A"}</p></div>
+                      <div className="rounded-lg bg-black/30 p-2.5"><p className="font-mono text-[10px] text-zinc-500">Linked</p><p className="font-bold tabular-nums">{scan.network.linkedPct !== null ? `${scan.network.linkedPct.toFixed(1)}%` : "N/A"}</p></div>
+                      <div className="rounded-lg bg-black/30 p-2.5"><p className="font-mono text-[10px] text-zinc-500">Combined</p><p className="font-bold tabular-nums">{scan.network.combinedPct !== null ? `${scan.network.combinedPct.toFixed(1)}%` : "N/A"}</p></div>
+                    </div>
+                    {scan.network.combinedPct !== null && (
+                      <p className="mt-2 text-sm text-zinc-300">Creator network controls approximately {scan.network.combinedPct.toFixed(1)}% of circulating supply.</p>
+                    )}
+                  </>
+                )}
+              </Section>
+
+              {/* first 60 minutes */}
+              <Section title="First 60 minutes" right={<span className="font-mono text-[11px] text-zinc-500">{scan.earlyBuyers.length} wallets</span>}>
+                {scan.earlyBuyers.length === 0 ? (
+                  <p className="text-sm text-zinc-400">Not enough launch activity yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {scan.earlyBuyers.slice(0, 12).map((b) => (
+                      <li key={b.address + b.time} className="flex items-center justify-between gap-2 rounded-lg bg-black/30 px-3 py-2 text-sm">
+                        <span className="font-mono text-xs">{short(b.address)}</span>
+                        <span className="font-mono text-[11px] tabular-nums text-zinc-400">{b.solAmount ? `${b.solAmount.toFixed(2)} SOL` : ""}</span>
+                        <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${b.linkedToCreator ? "border-amber-500/40 text-amber-300" : "border-white/10 text-zinc-500"}`}>
+                          {b.linkedToCreator ? (b.confidence ?? "linked") : "no link"}
                         </span>
                       </li>
                     ))}
                   </ul>
                 )}
-              </Card>
+              </Section>
 
-              {/* 3 top holders */}
-              <Card index="03" title={`Top holders (${scan.topHolders.length})`}>
+              {/* top holders */}
+              <Section title="Top holders" right={<span className="font-mono text-[11px] text-zinc-500">top 10: {top10Pct.toFixed(1)}%</span>}>
                 {scan.topHolders.length === 0 ? (
                   <p className="text-sm text-zinc-400">No holder data.</p>
                 ) : (
-                  <ul className="space-y-2 text-sm">
+                  <ul className="space-y-2">
                     {scan.topHolders.map((h, i) => (
-                      <li key={h.tokenAccount} className="rounded-sm bg-black/40 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-xs text-zinc-200">
-                            <span className="mr-2 text-zinc-600">#{i + 1}</span>{short(h.owner)}
-                          </span>
-                          <span className={`font-mono text-[11px] tabular-nums ${h.pct !== null && h.pct > 20 ? "text-[#ff2ea6]" : "text-zinc-400"}`}>
-                            {h.pct !== null ? `${h.pct.toFixed(1)}%` : "—"}
+                      <li key={h.tokenAccount} className="rounded-lg bg-black/30 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                          <span className="font-mono text-xs"><span className="mr-2 text-zinc-600">#{i + 1}</span>{short(h.owner)}</span>
+                          <span className="flex items-center gap-2">
+                            <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${TAG_STYLE[h.tag] ?? TAG_STYLE.unknown}`}>{h.tag}</span>
+                            <span className="font-mono text-[11px] tabular-nums text-zinc-300">{h.pct !== null ? `${h.pct.toFixed(1)}%` : "N/A"}</span>
                           </span>
                         </div>
                         <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/10">
-                          <div className={`h-full rounded-full ${h.pct !== null && h.pct > 20 ? "bg-[#ff2ea6]" : "bg-[#00ff9d]/70"}`} style={{ width: `${Math.min(100, h.pct ?? 0)}%` }} />
+                          <div className="h-full rounded-full bg-white/50" style={{ width: `${Math.min(100, h.pct ?? 0)}%` }} />
                         </div>
                       </li>
                     ))}
                   </ul>
                 )}
-              </Card>
+              </Section>
 
-              {/* 4 early buyers + links */}
-              <Card index="04" title={`First-hour buyers (${scan.earlyBuyers.length}) — ${linked.length} linked`}>
-                {scan.earlyBuyers.length === 0 ? (
-                  <p className="text-sm text-zinc-400">No first-hour buys detected (or pool age unknown).</p>
-                ) : (
-                  <ul className="space-y-2 text-sm">
-                    {scan.earlyBuyers.map((b) => (
-                      <li key={b.address + b.time} className={`rounded-sm border px-3 py-2 ${b.linkedToCreator ? "border-[#ff2ea6]/50 bg-[#ff2ea6]/[0.07]" : "border-white/[0.06] bg-black/40"}`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-xs text-zinc-200">{short(b.address)}</span>
-                          <span className="font-mono text-[11px] tabular-nums text-zinc-500">{b.solAmount ? `${b.solAmount.toFixed(2)} SOL` : ""} · {fmtDate(b.time)}</span>
-                        </div>
-                        {b.linkedToCreator && <p className="mt-1 font-mono text-xs text-[#ff8ac2]">[!] LINKED — {b.linkReason}</p>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-
-              {/* 5 sanity */}
-              <div className="hud-corner rounded-lg border border-[#00ff9d]/20 bg-gradient-to-b from-[#0b0f14] to-black/60 p-5">
-                <div className="flex items-baseline justify-between">
-                  <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">$5_of_$100 // sanity</p>
-                  <p className="font-display glow-num text-3xl font-black text-[#00ff9d]">{s}<span className="font-sans text-sm font-medium text-zinc-500"> / 10</span></p>
+              {/* market */}
+              <Section title="Market">
+                <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">Price</p><p className="mt-1 break-all font-bold tabular-nums">{fmtPrice(scan.market.priceUsd)}</p></div>
+                  <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">Liquidity</p><p className="mt-1 font-bold tabular-nums">{fmtCompact(scan.market.liquidityUsd)}</p></div>
+                  <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">1h flow</p><p className="mt-1 font-mono text-xs tabular-nums">{scan.market.txnsH1 ? `${scan.market.txnsH1.buys}B / ${scan.market.txnsH1.sells}S` : "N/A"}</p></div>
+                  <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">24h flow</p><p className="mt-1 font-mono text-xs tabular-nums">{scan.market.txnsH24 ? `${scan.market.txnsH24.buys}B / ${scan.market.txnsH24.sells}S` : "N/A"}</p></div>
                 </div>
-                <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/10">
-                  <div className="h-full rounded-full bg-gradient-to-r from-[#00ff9d] to-[#38e1ff]" style={{ width: `${s * 10}%` }} />
-                </div>
-                <ul className="mt-3 space-y-1.5 text-xs text-zinc-300">
-                  {scan.sanity.reasons.map((r, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      <span className={r.good ? "text-[#00ff9d]" : "text-[#ff2ea6]"}>{r.good ? "[+]" : "[!]"}</span>
-                      {r.label}
-                    </li>
+                <div className="mt-2 grid grid-cols-4 gap-2 text-center font-mono text-[11px]">
+                  {[["5m", scan.market.priceChangeM5], ["1h", scan.market.priceChangeH1], ["6h", scan.market.priceChangeH6], ["24h", scan.market.priceChangeH24]].map(([l, v]) => (
+                    <div key={l as string} className="rounded-lg bg-black/30 p-2">
+                      <p className="text-zinc-500">{l}</p>
+                      <p className={`tabular-nums ${(v as number | null) !== null && (v as number) >= 0 ? "text-emerald-400" : "text-[#ff8ac2]"}`}>
+                        {(v as number | null) === null ? "N/A" : `${(v as number) >= 0 ? "+" : ""}${(v as number).toFixed(1)}%`}
+                      </p>
+                    </div>
                   ))}
-                </ul>
-                <p className="mt-3 rounded-sm border border-[#00ff9d]/20 bg-black/40 p-3 text-sm text-zinc-200">{scan.sanity.verdict}</p>
-                <p className="mt-2 font-mono text-[11px] text-zinc-500">rule-based estimate from on-chain signals, not financial advice.</p>
-              </div>
+                </div>
+              </Section>
+
+              {/* project links */}
+              <Section title="Project links">
+                {scan.market.websites.length === 0 && scan.market.socials.length === 0 ? (
+                  <p className="text-sm text-zinc-400">No verified project socials found.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {scan.market.websites.map((w) => <a key={w.url} href={w.url} target="_blank" rel="noreferrer" className="cursor-pointer rounded-md border border-white/10 px-3 py-1.5 font-mono text-xs transition hover:border-white/30 hover:text-white">Website</a>)}
+                    {scan.market.socials.map((w) => <a key={w.url} href={w.url} target="_blank" rel="noreferrer" className="cursor-pointer rounded-md border border-white/10 px-3 py-1.5 font-mono text-xs transition hover:border-white/30 hover:text-white">{socialIcon(w.label)} {w.label}</a>)}
+                  </div>
+                )}
+                {xSearchUrl && <a href={xSearchUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block cursor-pointer font-mono text-xs text-zinc-400 underline underline-offset-2 transition hover:text-white">Search token on X</a>}
+              </Section>
+
+              {/* footer note */}
+              <p className="text-center font-mono text-[11px] text-zinc-600">Rule based estimate from on-chain signals, not financial advice.</p>
             </div>
           )}
 
-          <footer className="mt-12 border-t border-[#00ff9d]/10 pt-6 text-center">
-            <p className="font-mono text-[11px] text-zinc-600">XEZA // creator + early-wallet x-ray · helius + dexscreener</p>
+          <footer className="mt-12 border-t border-white/[0.06] pt-6 text-center">
+            <a href="https://x.com/salimteymouri" target="_blank" rel="noreferrer" className="cursor-pointer font-mono text-xs text-zinc-400 transition hover:text-white">
+              Built by Sello · X
+            </a>
           </footer>
         </div>
       </main>

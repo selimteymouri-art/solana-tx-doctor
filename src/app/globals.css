@@ -11,16 +11,10 @@
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jbmono);
   --font-display: var(--font-display);
-  /* cyberpunk x-ray tokens */
-  --color-neon: #00ff9d;
-  --color-magenta: #ff2ea6;
-  --color-cyan: #38e1ff;
-  --color-panel: #101418;
-  --color-edge: rgb(0 255 157 / 0.14);
 }
 
 body {
-  background: var(--background);
+  background: #070b12;
   color: var(--foreground);
   font-family: var(--font-inter), Arial, Helvetica, sans-serif;
 }
