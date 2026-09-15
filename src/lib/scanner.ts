@@ -48,6 +48,15 @@ export interface EarlyBuyer {
   solAmount: number | null;
 }
 
+export interface TopHolder {
+  owner: string; // wallet holding the tokens
+  tokenAccount: string; // the token account (ATA)
+  amount: number | null; // in token units
+  pct: number | null; // % of total supply
+}
+
+export interface TokenLink { label: string; url: string }
+
 export interface MarketInfo {
   priceUsd: number | null;
   liquidityUsd: number | null;
@@ -57,6 +66,9 @@ export interface MarketInfo {
   priceChangeH24: number | null;
   dex: string | null;
   pairUrl: string | null;
+  imageUrl: string | null;
+  websites: TokenLink[];
+  socials: TokenLink[];
 }
 
 export interface SanityScore {
@@ -74,6 +86,7 @@ export interface TokenScan {
   creator: CreatorInfo;
   creatorBuys: CreatorBuy[];
   earlyBuyers: EarlyBuyer[];
+  topHolders: TopHolder[];
   poolCreatedAt: string | null;
   market: MarketInfo;
   sanity: SanityScore;
@@ -163,7 +176,8 @@ async function findCreator(mint: string): Promise<{ address: string; source: Cre
     }
   } catch { /* fall through — pump.fun tokens have no metaplex creator */ }
 
-  // 3) fallback: oldest signer on the mint = first funder / deployer
+  // 3) fallback: oldest signer on the mint = first funder / deployer.
+  // Walk deeper than addressBounds (mints can have 10k+ sigs, paging back 5x1000).
   const { oldest } = await addressBounds(mint);
   // fetch the tx to find fee payer (the deployer)
   if (oldest?.signature) {
@@ -172,6 +186,20 @@ async function findCreator(mint: string): Promise<{ address: string; source: Cre
       const payer: string | undefined = tx?.transaction?.message?.accountKeys?.[0]?.pubkey;
       if (payer) return { address: payer, source: "firstFunder", name, symbol, decimals, supply };
     } catch { /* ignore */ }
+  }
+
+  // 4) last resort: name/symbol from DexScreener, creator unknown
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { cache: "no-store" });
+    const json = await res.json();
+    const pair: any = (json?.pairs ?? []).find((p: any) => p?.chainId === "solana");
+    if (pair?.baseToken) {
+      name = pair.baseToken.name ?? name;
+      symbol = pair.baseToken.symbol ?? symbol;
+    }
+  } catch { /* ignore */ }
+  if (name || symbol) {
+    return { address: "", source: "unknown", name, symbol, decimals, supply };
   }
   throw new Error("Could not determine the token creator (mint authority revoked and no history).");
 }
@@ -305,7 +333,7 @@ export async function linkEarlyBuyers(buyers: EarlyBuyer[], creator: string): Pr
 // ---------- step 5: market (DexScreener, no key needed) ----------
 
 export async function getMarket(mint: string): Promise<{ market: MarketInfo; poolCreatedAtMs: number | null }> {
-  const fallback: MarketInfo = { priceUsd: null, liquidityUsd: null, volumeH1: null, volumeH24: null, priceChangeH1: null, priceChangeH24: null, dex: null, pairUrl: null };
+  const fallback: MarketInfo = { priceUsd: null, liquidityUsd: null, volumeH1: null, volumeH24: null, priceChangeH1: null, priceChangeH24: null, dex: null, pairUrl: null, imageUrl: null, websites: [], socials: [] };
   try {
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { cache: "no-store" });
     if (!res.ok) return { market: fallback, poolCreatedAtMs: null };
@@ -314,6 +342,13 @@ export async function getMarket(mint: string): Promise<{ market: MarketInfo; poo
     if (!pairs.length) return { market: fallback, poolCreatedAtMs: null };
     pairs.sort((a, b) => (b?.liquidity?.usd ?? 0) - (a?.liquidity?.usd ?? 0));
     const best = pairs[0];
+    const info = best?.info ?? {};
+    const websites: TokenLink[] = Array.isArray(info.websites)
+      ? info.websites.filter((w: any) => w?.url).slice(0, 5).map((w: any) => ({ label: "Website", url: String(w.url) }))
+      : [];
+    const socials: TokenLink[] = Array.isArray(info.socials)
+      ? info.socials.filter((s: any) => s?.url).slice(0, 10).map((s: any) => ({ label: String(s.type ?? s.platform ?? "Link"), url: String(s.url) }))
+      : [];
     return {
       market: {
         priceUsd: best?.priceUsd ? Number(best.priceUsd) : null,
@@ -324,12 +359,62 @@ export async function getMarket(mint: string): Promise<{ market: MarketInfo; poo
         priceChangeH24: best?.priceChange?.h24 ?? null,
         dex: best?.dexId ?? null,
         pairUrl: best?.url ?? null,
+        imageUrl: typeof info.imageUrl === "string" ? info.imageUrl : null,
+        websites,
+        socials,
       },
       poolCreatedAtMs: typeof best?.pairCreatedAt === "number" ? best.pairCreatedAt : null,
     };
   } catch {
     return { market: fallback, poolCreatedAtMs: null };
   }
+}
+
+// ---------- top holders (largest token accounts + their owner wallets) ----------
+
+async function getTopHolders(mint: string, supply: number | null, limit = 10): Promise<TopHolder[]> {
+  // NOTE: getTokenLargestAccounts fails on giant mints (e.g. wSOL ~10M accounts).
+  // DAS getTokenAccounts is the capped fallback — it returns owner + amount directly.
+  let largest: { address: string; amount: string; decimals: number; owner?: string }[] = [];
+  try {
+    const r = await rpc<{ value: { address: string; amount: string; decimals: number }[] }>(
+      "getTokenLargestAccounts",
+      [mint]
+    );
+    largest = r.value ?? [];
+  } catch {
+    const r = await das<{ token_accounts: { address: string; owner?: string; amount: number; decimals?: number }[] }>(
+      "getTokenAccounts",
+      { mint, limit: 20 }
+    ).catch(() => ({ token_accounts: [] as { address: string; owner?: string; amount: number; decimals?: number }[] }));
+    largest = (r.token_accounts ?? []).map((t) => ({
+      address: t.address,
+      amount: String(Math.round(t.amount ?? 0)), // DAS amount is raw base units
+      decimals: t.decimals ?? 0,
+      owner: t.owner,
+    }));
+    if (!largest.length) throw new Error("holder list unavailable (giant mint, RPC refused largest-accounts)");
+  }
+  const out: TopHolder[] = [];
+  for (const t of largest.slice(0, limit)) {
+    let owner = t.owner ?? t.address;
+    if (!t.owner) {
+      try {
+        const info = await rpc<any>("getAccountInfo", [t.address, { encoding: "jsonParsed" }]);
+        const o = info?.value?.data?.parsed?.info?.owner;
+        if (typeof o === "string" && o) owner = o;
+      } catch { /* keep token-account address */ }
+    }
+    const raw = Number(t.amount);
+    const amount = Number.isFinite(raw) ? raw / 10 ** (typeof t.decimals === "number" ? t.decimals : 0) : null;
+    out.push({
+      owner,
+      tokenAccount: t.address,
+      amount,
+      pct: amount !== null && supply ? (amount / supply) * 100 : null,
+    });
+  }
+  return out;
 }
 
 // ---------- step 6: sanity score — is a $5 buy out of $100 sensible? ----------
@@ -340,6 +425,7 @@ export async function getMarket(mint: string): Promise<{ market: MarketInfo; poo
 export function scoreSanity(opts: {
   liquidityUsd: number | null;
   creatorSharePct: number | null; // creator token balance / supply * 100
+  top1Pct: number | null; // largest holder % of supply
   linkedEarlyCount: number;
   earlyCount: number;
   poolAgeHours: number | null;
@@ -348,7 +434,7 @@ export function scoreSanity(opts: {
 }): SanityScore {
   let score = 5;
   const reasons: SanityScore["reasons"] = [];
-  const { liquidityUsd, creatorSharePct, linkedEarlyCount, earlyCount, poolAgeHours, priceChangeH1, creatorBuys } = opts;
+  const { liquidityUsd, creatorSharePct, top1Pct, linkedEarlyCount, earlyCount, poolAgeHours, priceChangeH1, creatorBuys } = opts;
 
   // position sizing: $5 of $100 = 5% — acceptable for a lotto ticket, never for rent money
   reasons.push({ label: "$5 is 5% of $100 — lotto-ticket sizing, survivable if it goes to zero", good: true });
@@ -378,6 +464,14 @@ export function scoreSanity(opts: {
       score += 1;
       reasons.push({ label: `Creator holds ~${creatorSharePct.toFixed(1)}% — low dump leverage`, good: true });
     }
+  }
+
+  if (top1Pct !== null && top1Pct > 50) {
+    score -= 2;
+    reasons.push({ label: `Top holder controls ~${top1Pct.toFixed(1)}% of supply — one wallet can nuke it`, good: false });
+  } else if (top1Pct !== null && top1Pct > 20) {
+    score -= 1;
+    reasons.push({ label: `Top holder controls ~${top1Pct.toFixed(1)}% of supply`, good: false });
   }
 
   if (earlyCount > 0) {
@@ -428,24 +522,34 @@ export function scoreSanity(opts: {
 export async function scanToken(mint: string): Promise<TokenScan> {
   const warnings: string[] = [];
   const found = await findCreator(mint);
-  const [solBalance, tokenBalance] = await Promise.all([
-    getSolBalance(found.address),
-    getTokenBalance(found.address, mint),
-  ]);
+  const creatorKnown = found.address !== "";
+  if (!creatorKnown) {
+    warnings.push("Creator wallet not determinable (mint authority revoked, history too deep) — creator + insider-link sections skipped.");
+  }
+  const [solBalance, tokenBalance] = creatorKnown
+    ? await Promise.all([getSolBalance(found.address), getTokenBalance(found.address, mint)])
+    : [null, null];
   const creator: CreatorInfo = { address: found.address, source: found.source, solBalance, tokenBalance };
 
   let creatorBuys: CreatorBuy[] = [];
-  try {
-    creatorBuys = await getCreatorBuys(found.address, mint);
-  } catch { warnings.push("Could not load creator buys."); }
+  if (creatorKnown) {
+    try {
+      creatorBuys = await getCreatorBuys(found.address, mint);
+    } catch { warnings.push("Could not load creator buys."); }
+  }
 
   const { market, poolCreatedAtMs } = await getMarket(mint);
   const poolCreatedAt = poolCreatedAtMs ? new Date(poolCreatedAtMs).toISOString() : null;
 
+  let topHolders: TopHolder[] = [];
+  try {
+    topHolders = await getTopHolders(mint, found.supply);
+  } catch { warnings.push("Could not load top holders."); }
+
   let earlyBuyers: EarlyBuyer[] = [];
   try {
     earlyBuyers = await getEarlyBuyers(mint, poolCreatedAtMs);
-    earlyBuyers = await linkEarlyBuyers(earlyBuyers, found.address);
+    if (creatorKnown) earlyBuyers = await linkEarlyBuyers(earlyBuyers, found.address);
     if (!earlyBuyers.length && poolCreatedAtMs && Date.now() - poolCreatedAtMs > 2 * 24 * 3_600_000) {
       warnings.push("Pool is older than 2 days — first-hour wallets are no longer in RPC paging range.");
     }
@@ -457,6 +561,7 @@ export async function scanToken(mint: string): Promise<TokenScan> {
   const sanity = scoreSanity({
     liquidityUsd: market.liquidityUsd,
     creatorSharePct,
+    top1Pct: topHolders[0]?.pct ?? null,
     linkedEarlyCount: earlyBuyers.filter((b) => b.linkedToCreator).length,
     earlyCount: earlyBuyers.length,
     poolAgeHours,
@@ -473,6 +578,7 @@ export async function scanToken(mint: string): Promise<TokenScan> {
     creator,
     creatorBuys,
     earlyBuyers,
+    topHolders,
     poolCreatedAt,
     market,
     sanity,

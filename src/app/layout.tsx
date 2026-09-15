@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
+import { Orbitron, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Space_Grotesk({
+const display = Orbitron({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["600", "700", "800", "900"],
 });
 
 const sans = Inter({
@@ -19,9 +19,9 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Solana Tx Doctor — Understand any transaction in seconds",
+  title: "Xeza — Meme Coin X-Ray",
   description:
-    "Paste a Solana transaction signature and get a plain-English diagnosis, wallet context and risk estimate. Powered by Helius.",
+    "Paste a Solana token address. See the creator, top holders, first-hour wallets, insider links, liquidity — and an honest 1–10 sanity score.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
