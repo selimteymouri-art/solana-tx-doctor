@@ -19,9 +19,9 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "XEZA · The $5 Test",
+  title: "XEZA · 5$ Test",
   description:
-    "If your entire bankroll was $100, how rational would putting $5 here be? Paste a Solana token contract and run the $5 Test.",
+    "If your entire bankroll was $100, how rational would putting $5 here be? Paste a Solana token contract and run the 5$ Test.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

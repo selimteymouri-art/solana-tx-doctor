@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import XezaPixelInk from "@/components/XezaPixelInk";
 
 interface CreatorBuy { signature: string; time: string | null; side: string; solAmount: number | null }
 interface EarlyBuyer { address: string; time: string | null; linkedToCreator: boolean; linkReason: string | null; confidence: string | null; solAmount: number | null }
@@ -78,9 +79,37 @@ function socialIcon(label: string) {
   return "WEB";
 }
 
-function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, right, children, index }: { title: string; right?: React.ReactNode; children: React.ReactNode; index?: number }) {
+  const ref = useRef<HTMLElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setVisible(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          obs.disconnect();
+        }
+      },
+      { threshold: 0.08 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
   return (
-    <section aria-label={title} className="rounded-xl border border-white/[0.08] bg-[#0c1017] p-5">
+    <section
+      ref={ref}
+      aria-label={title}
+      style={{ transitionDelay: `${(index ?? 0) * 70}ms` }}
+      className={`rounded-xl border border-white/[0.08] bg-[#0c1017] p-5 transition-all duration-700 ease-out ${
+        visible ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"
+      }`}
+    >
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="font-display text-[13px] font-bold uppercase tracking-[0.16em] text-zinc-300">{title}</h2>
         {right}
@@ -99,7 +128,7 @@ const SCAN_STEPS = [
   "Checking holder concentration",
   "Checking liquidity",
   "Checking insider activity",
-  "Building $5 Test",
+  "Building 5$ Test",
 ];
 
 const ERR_COPY: Record<string, string> = {
@@ -166,7 +195,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#070b12] font-sans text-zinc-100">
+    <div className="relative isolate min-h-screen bg-[#070b12] font-sans text-zinc-100">
+      <XezaPixelInk />
       <a href="#scanner" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-black">
         Skip to scanner
       </a>
@@ -174,6 +204,7 @@ export default function Home() {
       <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#070b12]/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-2 px-5">
           <a href="#top" className="flex items-center gap-2">
+            <Image src="/xeza-logo.png" alt="XEZA" width={28} height={28} className="rounded-md" />
             <span className="font-display text-sm font-black tracking-[0.14em]">XEZA</span>
           </a>
           <nav className="ml-6 hidden items-center gap-5 text-[13px] text-zinc-400 sm:flex">
@@ -181,20 +212,21 @@ export default function Home() {
             <a href="https://docs.helius.dev" target="_blank" rel="noreferrer" className="transition hover:text-white">Helius Docs</a>
           </nav>
           <a href="#scanner" className="ml-auto cursor-pointer rounded-lg bg-white px-4 py-1.5 text-[13px] font-bold text-black transition hover:brightness-90">
-            Run the $5 Test
+          Run the 5$ Test
           </a>
         </div>
       </header>
 
-      <main id="top" className="relative mx-auto max-w-3xl px-5 pb-16">
+      <main id="top" className="relative z-10 mx-auto max-w-3xl px-5 pb-16">
         <div className="relative z-10">
           {!scan && !loading && (
             <div className="pt-16 text-center sm:pt-24">
-              <p className="font-display text-xs font-bold tracking-[0.3em] text-zinc-500">XEZA</p>
-              <h1 className="font-display mx-auto mt-4 max-w-xl text-5xl font-black tracking-tight sm:text-6xl">
-                THE $5 TEST
+              <Image src="/xeza-logo.png" alt="XEZA logo" width={72} height={72} className="reveal mx-auto rounded-2xl" style={{ ["--d" as string]: "0s" }} />
+              <p className="reveal font-display mt-5 text-xs font-bold tracking-[0.3em] text-zinc-500" style={{ ["--d" as string]: "0.05s" }}>XEZA</p>
+              <h1 className="reveal font-display mx-auto mt-4 max-w-xl text-5xl font-black tracking-tight sm:text-6xl" style={{ ["--d" as string]: "0.12s" }}>
+                5$ TEST
               </h1>
-              <p className="mx-auto mt-4 max-w-md text-[15px] leading-relaxed text-zinc-400">
+              <p className="reveal mx-auto mt-4 max-w-md text-[15px] leading-relaxed text-zinc-400" style={{ ["--d" as string]: "0.2s" }}>
                 If your entire bankroll was $100, how rational would putting $5 here be?
               </p>
             </div>
@@ -202,7 +234,7 @@ export default function Home() {
 
           {scan && (
             <div className="pt-8">
-              <p className="text-center font-display text-[11px] font-bold tracking-[0.3em] text-zinc-500">XEZA · THE $5 TEST</p>
+              <p className="text-center font-display text-[11px] font-bold tracking-[0.3em] text-zinc-500">XEZA · 5$ TEST</p>
             </div>
           )}
 
@@ -226,7 +258,7 @@ export default function Home() {
                 aria-busy={loading}
                 className="h-12 cursor-pointer rounded-lg bg-white px-7 text-sm font-bold text-black transition hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {loading ? "Testing" : "Run the $5 Test"}
+                {loading ? "Testing" : "Run the 5$ Test"}
               </button>
             </form>
             {loading && (
@@ -281,7 +313,7 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="text-center sm:text-right">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">THE $5 TEST</p>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">5$ TEST</p>
                     <p className={`font-display text-5xl font-black tabular-nums ${riskColor}`}>{s}<span className="text-lg text-zinc-500">/10</span></p>
                     <p className={`font-mono text-xs font-bold tracking-widest ${riskColor}`}>{riskLabel}</p>
                   </div>
@@ -311,7 +343,7 @@ export default function Home() {
               </div>
 
               {/* why this score */}
-              <Section title="Why this score">
+              <Section index={0} title="Why this score">
                 <ul className="space-y-1.5 text-sm">
                   {scan.sanity.reasons.map((r, i) => (
                     <li key={i} className="flex items-start gap-2 text-zinc-300">
@@ -324,7 +356,7 @@ export default function Home() {
               </Section>
 
               {/* creator */}
-              <Section title="Creator wallet" right={<span className="font-mono text-[11px] text-zinc-500">{scan.creator.address ? (SRC_LABEL[scan.creator.source] ?? "") : ""}</span>}>
+              <Section index={1} title="Creator wallet" right={<span className="font-mono text-[11px] text-zinc-500">{scan.creator.address ? (SRC_LABEL[scan.creator.source] ?? "") : ""}</span>}>
                 {!scan.creator.address ? (
                   <p className="text-sm text-zinc-400">No meaningful creator linked wallet cluster detected. Mint authority revoked, history too deep to trace.</p>
                 ) : (
@@ -341,7 +373,7 @@ export default function Home() {
               </Section>
 
               {/* creator network */}
-              <Section title="Creator network" right={<span className="font-mono text-[11px] text-zinc-500">confidence: {scan.network.confidence}</span>}>
+              <Section index={2} title="Creator network" right={<span className="font-mono text-[11px] text-zinc-500">confidence: {scan.network.confidence}</span>}>
                 {scan.network.linkedCount === 0 ? (
                   <p className="text-sm text-zinc-400">No meaningful creator linked wallet cluster detected.</p>
                 ) : (
@@ -371,7 +403,7 @@ export default function Home() {
               </Section>
 
               {/* first 60 minutes */}
-              <Section title="First 60 minutes" right={<span className="font-mono text-[11px] text-zinc-500">{scan.earlyBuyers.length} wallets</span>}>
+              <Section index={3} title="First 60 minutes" right={<span className="font-mono text-[11px] text-zinc-500">{scan.earlyBuyers.length} wallets</span>}>
                 {scan.earlyBuyers.length === 0 ? (
                   <p className="text-sm text-zinc-400">Not enough launch activity yet.</p>
                 ) : (
@@ -390,7 +422,7 @@ export default function Home() {
               </Section>
 
               {/* top holders */}
-              <Section title="Top holders" right={<span className="font-mono text-[11px] text-zinc-500">top 10: {top10Pct.toFixed(1)}%</span>}>
+              <Section index={4} title="Top holders" right={<span className="font-mono text-[11px] text-zinc-500">top 10: {top10Pct.toFixed(1)}%</span>}>
                 {scan.topHolders.length === 0 ? (
                   <p className="text-sm text-zinc-400">No holder data.</p>
                 ) : (
@@ -414,7 +446,7 @@ export default function Home() {
               </Section>
 
               {/* market */}
-              <Section title="Market">
+              <Section index={5} title="Market">
                 <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
                   <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">Price</p><p className="mt-1 break-all font-bold tabular-nums">{fmtPrice(scan.market.priceUsd)}</p></div>
                   <div className="rounded-lg bg-black/30 p-3"><p className="font-mono text-[10px] text-zinc-500">Liquidity</p><p className="mt-1 font-bold tabular-nums">{fmtCompact(scan.market.liquidityUsd)}</p></div>
@@ -434,7 +466,7 @@ export default function Home() {
               </Section>
 
               {/* project links */}
-              <Section title="Project links">
+              <Section index={6} title="Project links">
                 {scan.market.websites.length === 0 && scan.market.socials.length === 0 ? (
                   <p className="text-sm text-zinc-400">No verified project socials found.</p>
                 ) : (
@@ -451,10 +483,25 @@ export default function Home() {
             </div>
           )}
 
-          <footer className="mt-12 border-t border-white/[0.06] pt-6 text-center">
-            <a href="https://x.com/salimteymouri" target="_blank" rel="noreferrer" className="cursor-pointer font-mono text-xs text-zinc-400 transition hover:text-white">
-              Built by Sello · X
-            </a>
+          <footer className="mt-12 border-t border-white/[0.06] pt-6">
+            <div className="flex flex-col items-center gap-4">
+              <Image src="/xeza-logo.png" alt="XEZA" width={36} height={36} className="rounded-lg" />
+              <div className="flex items-center gap-4">
+                <a href="https://helius.dev" target="_blank" rel="noreferrer" title="Powered by Helius" className="opacity-60 transition hover:opacity-100">
+                  <Image src="/helius-logo.png" alt="Helius" width={28} height={28} className="rounded-full" />
+                </a>
+                <Image src="/solana-mark.svg" alt="Solana" width={20} height={20} className="opacity-60" />
+                <a href="https://x.com/salimteymouri" target="_blank" rel="noreferrer" className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 transition hover:border-white/25 hover:bg-white/[0.07]">
+                  <Image src="/x-logo.svg" alt="X" width={13} height={13} />
+                  <Image src="/builder.png" alt="Sello" width={28} height={28} className="h-7 w-7 rounded-full object-cover" />
+                  <span className="text-left">
+                    <span className="block text-xs font-semibold text-zinc-100">Sello</span>
+                    <span className="block font-mono text-[10px] text-zinc-500">@salimteymouri</span>
+                  </span>
+                </a>
+              </div>
+              <p className="font-mono text-[11px] text-zinc-600">Built by Sello · Powered by Helius on Solana</p>
+            </div>
           </footer>
         </div>
       </main>
